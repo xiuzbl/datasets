@@ -36,6 +36,7 @@ containing your `DatasetBuilder` definition imported.
 
 """
 
+import argparse
 import importlib
 import os
 import pdb
@@ -44,6 +45,7 @@ import time
 from absl import app
 from absl import flags
 from absl import logging
+from absl.flags import argparse_flags
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 import termcolor
@@ -118,7 +120,23 @@ flags.DEFINE_boolean("sleep_start", False,
 flags.DEFINE_boolean("disable_tqdm", False, "If True, disable tqdm.")
 
 
-def download_config():
+def _flag_parser(argv):
+  """Command lines flags."""
+  # TODO(tfds): Migrate all flags to argparse.
+
+  parser = argparse_flags.ArgumentParser()
+
+  parser.add_argument(
+      "--force_checksums_validation",
+      action="store_true",
+      help="If True, raise an error if the checksums are not found.",
+  )
+
+  # Ignore name of the program argv[0]
+  return parser.parse_args(argv[1:])
+
+
+def download_config(args: argparse.Namespace) -> tfds.download.DownloadConfig:
   return tfds.download.DownloadConfig(
       extract_dir=FLAGS.extract_dir,
       manual_dir=FLAGS.manual_dir,
@@ -127,14 +145,18 @@ def download_config():
       download_mode=tfds.download.GenerateMode.REUSE_DATASET_IF_EXISTS,
       max_examples_per_split=FLAGS.max_examples_per_split,
       register_checksums=FLAGS.register_checksums,
+      force_checksums_validation=args.force_checksums_validation,
   )
 
 
-def download_and_prepare(builder):
+def download_and_prepare(
+    builder: tfds.core.DatasetBuilder,
+    args: argparse.Namespace,
+) -> None:
   """Generate data for a given dataset."""
   logging.info("download_and_prepare for dataset %s...", builder.info.full_name)
 
-  dl_config = download_config()
+  dl_config = download_config(args)
 
   if isinstance(builder, tfds.core.BeamBasedBuilder):
     beam = tfds.core.lazy_imports.apache_beam
@@ -165,7 +187,7 @@ def import_modules(modules):
       importlib.import_module(m)
 
 
-def main(_):
+def main(args: argparse.Namespace):
   if FLAGS.module_import:
     import_modules(FLAGS.module_import)
 
@@ -213,7 +235,7 @@ def main(_):
     logging.info("Running download_and_prepare for config: %s", config.name)
     builder_for_config = tfds.builder(
         builder.name, data_dir=FLAGS.data_dir, config=config, **version_kwarg)
-    download_and_prepare(builder_for_config)
+    download_and_prepare(builder_for_config, args)
   else:
     for name, builder in builders.items():
       if builder.BUILDER_CONFIGS and "/" not in name:
@@ -225,13 +247,13 @@ def main(_):
               data_dir=FLAGS.data_dir,
               config=config,
               **version_kwarg)
-          download_and_prepare(builder_for_config)
+          download_and_prepare(builder_for_config, args)
       else:
         # If there is a slash in the name, then user requested a specific
         # dataset configuration.
-        download_and_prepare(builder)
+        download_and_prepare(builder, args)
 
 
 if __name__ == "__main__":
   tf.enable_v2_behavior()
-  app.run(main)
+  app.run(main, flags_parser=_flag_parser)
